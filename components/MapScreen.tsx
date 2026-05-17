@@ -1,11 +1,13 @@
 import React, { forwardRef, useMemo } from 'react';
-import { StyleSheet } from 'react-native';
-import MapView, { Polygon, PROVIDER_GOOGLE, MapPressEvent } from 'react-native-maps';
+import { StyleSheet, View } from 'react-native';
+import MapView, { Polygon, Marker, PROVIDER_GOOGLE, MapPressEvent } from 'react-native-maps';
 import { Coordinate, Question, Region } from '../types/game';
+import { TrainStop } from '../utils/overpass';
 
 interface MapScreenProps {
   regions: Region[];
   questions: Question[];
+  trainStops: TrainStop[];
   drawingZone: Coordinate[];
   isDrawing: boolean;
   onMapPress: (e: MapPressEvent) => void;
@@ -198,12 +200,36 @@ function buildMask(
   return { outer, holes };
 }
 
+// Ray-casting point-in-polygon test
+function isInsidePolygon(point: Coordinate, polygon: Coordinate[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const yi = polygon[i].latitude, xi = polygon[i].longitude;
+    const yj = polygon[j].latitude, xj = polygon[j].longitude;
+    if (
+      yi > point.latitude !== yj > point.latitude &&
+      point.longitude < ((xj - xi) * (point.latitude - yi)) / (yj - yi) + xi
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 const MapScreen = forwardRef<MapView, MapScreenProps>(
-  ({ regions, questions, drawingZone, isDrawing, onMapPress, onBoundaryPress }, ref) => {
+  ({ regions, questions, trainStops, drawingZone, isDrawing, onMapPress, onBoundaryPress }, ref) => {
     const mask = useMemo(
       () => (regions.length > 0 ? buildMask(regions, questions) : null),
       [regions, questions]
     );
+
+    // Only show stops inside the safe area (mask holes)
+    const visibleStops = useMemo(() => {
+      if (!mask || mask.holes.length === 0) return trainStops;
+      return trainStops.filter((stop) =>
+        mask.holes.some((hole) => isInsidePolygon(stop.coordinate, hole))
+      );
+    }, [trainStops, mask]);
 
     return (
       <MapView
@@ -259,6 +285,18 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
             lineDashPattern={[10, 5]}
           />
         )}
+
+        {/* Train stop markers — only in possible hiding area */}
+        {visibleStops.map((stop) => (
+          <Marker
+            key={stop.id}
+            coordinate={stop.coordinate}
+            title={stop.name}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={styles.trainDot} />
+          </Marker>
+        ))}
       </MapView>
     );
   }
@@ -267,6 +305,14 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
 const styles = StyleSheet.create({
   map: {
     ...StyleSheet.absoluteFillObject,
+  },
+  trainDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#e74c3c',
+    borderWidth: 1,
+    borderColor: '#fff',
   },
 });
 
