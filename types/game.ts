@@ -3,11 +3,21 @@ export interface Coordinate {
   longitude: number;
 }
 
+export type QuestionType = 'freeform' | 'radar';
+
+export interface RadarData {
+  center: Coordinate;
+  radiusKm: number;
+  hiderInside: boolean;
+}
+
 export interface Question {
   id: string;
+  type: QuestionType;
   text: string;
   answer: string;
   zone: Coordinate[] | null;
+  radar: RadarData | null;
   timestamp: number;
 }
 

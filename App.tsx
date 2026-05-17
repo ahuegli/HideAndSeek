@@ -101,6 +101,60 @@ export default function App() {
     setDrawingZone([]);
   }, []);
 
+  const handleAddRadar = useCallback(async (radiusKm: number, hiderInside: boolean) => {
+    setShowQuestions(false);
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const question: Question = {
+        id: generateId(),
+        type: 'radar',
+        text: `Radar: ${radiusKm} km`,
+        answer: hiderInside ? 'Inside' : 'Outside',
+        zone: null,
+        radar: {
+          center: {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          },
+          radiusKm,
+          hiderInside,
+        },
+        timestamp: Date.now(),
+      };
+      setQuestions((prev) => [...prev, question]);
+    } catch {
+      Alert.alert('Location Error', 'Could not get your current location.');
+    }
+  }, []);
+
+  const handleEditRadar = useCallback((id: string, radiusKm: number, hiderInside: boolean) => {
+    setQuestions((prev) =>
+      prev.map((q) =>
+        q.id === id && q.radar
+          ? {
+              ...q,
+              text: `Radar: ${radiusKm} km`,
+              answer: hiderInside ? 'Inside' : 'Outside',
+              radar: { ...q.radar, radiusKm, hiderInside },
+            }
+          : q
+      )
+    );
+  }, []);
+
+  const handleLocateRadar = useCallback((id: string) => {
+    const q = questions.find((q) => q.id === id);
+    if (!q?.radar) return;
+    setShowQuestions(false);
+    mapRef.current?.animateToRegion({
+      ...q.radar.center,
+      latitudeDelta: (q.radar.radiusKm / 111.32) * 3,
+      longitudeDelta: (q.radar.radiusKm / 111.32) * 3,
+    }, 500);
+  }, [questions]);
+
   const handleMapPress = useCallback((e: MapPressEvent) => {
     const { latitude, longitude } = e.nativeEvent.coordinate;
     setDrawingZone((prev) => [...prev, { latitude, longitude }]);
@@ -114,9 +168,11 @@ export default function App() {
     if (!pendingQuestion) return;
     const question: Question = {
       id: generateId(),
+      type: 'freeform',
       text: pendingQuestion.text,
       answer: pendingQuestion.answer,
       zone: drawingZone.length >= 3 ? drawingZone : null,
+      radar: null,
       timestamp: Date.now(),
     };
     setQuestions((prev) => [...prev, question]);
@@ -130,9 +186,11 @@ export default function App() {
     // Save question without a zone
     const question: Question = {
       id: generateId(),
+      type: 'freeform',
       text: pendingQuestion.text,
       answer: pendingQuestion.answer,
       zone: null,
+      radar: null,
       timestamp: Date.now(),
     };
     setQuestions((prev) => [...prev, question]);
@@ -220,6 +278,9 @@ export default function App() {
         visible={showQuestions}
         onClose={() => setShowQuestions(false)}
         onAddQuestion={handleAddQuestion}
+        onAddRadar={handleAddRadar}
+        onEditRadar={handleEditRadar}
+        onLocateRadar={handleLocateRadar}
       />
 
       <PlaceSearch

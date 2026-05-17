@@ -20,13 +20,138 @@ const ZONE_COLORS = [
   'rgba(26, 188, 156, 0.35)',
 ];
 
-// Build a padded bounding box around all regions and use each region
-// as a hole, so the gray fill covers everything outside all regions.
-function buildMask(regions: Region[]): {
-  outer: Coordinate[];
-  holes: Coordinate[][];
-} {
-  let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+// Approximate a circle as a polygon with N vertices
+function circleToPolygon(
+  center: Coordinate,
+  radiusKm: number,
+  numPoints = 64
+): Coordinate[] {
+  const coords: Coordinate[] = [];
+  const radiusDegLat = radiusKm / 111.32;
+  const radiusDegLng =
+    radiusKm / (111.32 * Math.cos((center.latitude * Math.PI) / 180));
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (2 * Math.PI * i) / numPoints;
+    coords.push({
+      latitude: center.latitude + radiusDegLat * Math.sin(angle),
+      longitude: center.longitude + radiusDegLng * Math.cos(angle),
+    });
+  }
+  return coords;
+}
+
+// --- Polygon boolean helpers ---
+
+// Cross product of edge (a→b) and point p. Positive = p is left of edge.
+function cross(a: Coordinate, b: Coordinate, p: Coordinate): number {
+  return (
+    (b.longitude - a.longitude) * (p.latitude - a.latitude) -
+    (b.latitude - a.latitude) * (p.longitude - a.longitude)
+  );
+}
+
+function lineIntersect(
+  p1: Coordinate,
+  p2: Coordinate,
+  p3: Coordinate,
+  p4: Coordinate
+): Coordinate {
+  const d =
+    (p1.longitude - p2.longitude) * (p3.latitude - p4.latitude) -
+    (p1.latitude - p2.latitude) * (p3.longitude - p4.longitude);
+  const t =
+    ((p1.longitude - p3.longitude) * (p3.latitude - p4.latitude) -
+      (p1.latitude - p3.latitude) * (p3.longitude - p4.longitude)) / d;
+  return {
+    latitude: p1.latitude + t * (p2.latitude - p1.latitude),
+    longitude: p1.longitude + t * (p2.longitude - p1.longitude),
+  };
+}
+
+// Sutherland-Hodgman: clip any polygon to inside of a convex polygon
+function clipToConvex(
+  subject: Coordinate[],
+  clip: Coordinate[]
+): Coordinate[] {
+  let output = [...subject];
+  for (let i = 0; i < clip.length && output.length > 0; i++) {
+    const input = output;
+    output = [];
+    const a = clip[i];
+    const b = clip[(i + 1) % clip.length];
+    for (let j = 0; j < input.length; j++) {
+      const curr = input[j];
+      const prev = input[(j + input.length - 1) % input.length];
+      const cIn = cross(a, b, curr) >= 0;
+      const pIn = cross(a, b, prev) >= 0;
+      if (cIn) {
+        if (!pIn) output.push(lineIntersect(prev, curr, a, b));
+        output.push(curr);
+      } else if (pIn) {
+        output.push(lineIntersect(prev, curr, a, b));
+      }
+    }
+  }
+  return output;
+}
+
+// Shoelace formula for polygon area (used for comparison)
+function polygonArea(coords: Coordinate[]): number {
+  let area = 0;
+  for (let i = 0; i < coords.length; i++) {
+    const j = (i + 1) % coords.length;
+    area += coords[i].longitude * coords[j].latitude;
+    area -= coords[j].longitude * coords[i].latitude;
+  }
+  return Math.abs(area / 2);
+}
+
+// Bridge-cut: create a single polygon representing outer minus a hole
+// (hole must be entirely inside outer)
+function bridgeCut(
+  outer: Coordinate[],
+  hole: Coordinate[]
+): Coordinate[] {
+  // Find closest pair of vertices
+  let minD = Infinity;
+  let oi = 0;
+  let hi = 0;
+  for (let i = 0; i < outer.length; i++) {
+    for (let j = 0; j < hole.length; j++) {
+      const d =
+        (outer[i].latitude - hole[j].latitude) ** 2 +
+        (outer[i].longitude - hole[j].longitude) ** 2;
+      if (d < minD) {
+        minD = d;
+        oi = i;
+        hi = j;
+      }
+    }
+  }
+  const result: Coordinate[] = [];
+  // Outer up to and including bridge point
+  for (let i = 0; i <= oi; i++) result.push(outer[i]);
+  // Traverse hole in reverse (opposite winding) back to start
+  for (let i = 0; i <= hole.length; i++) {
+    result.push(hole[(hi - i + hole.length) % hole.length]);
+  }
+  // Continue outer from bridge point to end
+  for (let i = oi; i < outer.length; i++) result.push(outer[i]);
+  return result;
+}
+
+// Build a single unified mask: one polygon covering ALL eliminated areas.
+// The holes represent only the "safe" area where the hider could still be.
+function buildMask(
+  regions: Region[],
+  questions: Question[]
+): { outer: Coordinate[]; holes: Coordinate[][] } | null {
+  if (regions.length === 0) return null;
+
+  let minLat = 90,
+    maxLat = -90,
+    minLng = 180,
+    maxLng = -180;
   for (const region of regions) {
     for (const c of region.coords) {
       if (c.latitude < minLat) minLat = c.latitude;
@@ -42,14 +167,42 @@ function buildMask(regions: Region[]): {
     { latitude: maxLat + pad, longitude: maxLng + pad },
     { latitude: maxLat + pad, longitude: minLng - pad },
   ];
-  return { outer, holes: regions.map((r) => r.coords) };
+
+  // Start with region polygons as safe-area holes
+  let holes: Coordinate[][] = regions.map((r) => [...r.coords]);
+
+  // Apply each radar question to shrink the safe area
+  const radars = questions.filter((q) => q.radar);
+  for (const q of radars) {
+    const circle = circleToPolygon(q.radar!.center, q.radar!.radiusKm);
+
+    if (q.radar!.hiderInside) {
+      // Hider IS inside circle → safe area = current holes ∩ circle
+      holes = holes
+        .map((h) => clipToConvex(h, circle))
+        .filter((h) => h.length >= 3);
+    } else {
+      // Hider NOT inside circle → safe area = current holes − circle
+      holes = holes
+        .flatMap((hole) => {
+          const intersection = clipToConvex(hole, circle);
+          if (intersection.length < 3) return [hole]; // No overlap, hole unchanged
+          // If circle covers nearly all of hole, eliminate it
+          if (polygonArea(intersection) / polygonArea(hole) > 0.99) return [];
+          return [bridgeCut(hole, intersection)];
+        })
+        .filter((h) => h.length >= 3);
+    }
+  }
+
+  return { outer, holes };
 }
 
 const MapScreen = forwardRef<MapView, MapScreenProps>(
   ({ regions, questions, drawingZone, isDrawing, onMapPress, onBoundaryPress }, ref) => {
     const mask = useMemo(
-      () => (regions.length > 0 ? buildMask(regions) : null),
-      [regions]
+      () => (regions.length > 0 ? buildMask(regions, questions) : null),
+      [regions, questions]
     );
 
     return (
@@ -62,7 +215,7 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
         showsUserLocation
         showsMyLocationButton
       >
-        {/* Gray mask with cutouts for all regions */}
+        {/* Single unified gray mask covering all eliminated areas */}
         {mask && (
           <Polygon
             coordinates={mask.outer}
