@@ -9,14 +9,17 @@ import {
   StyleSheet,
 } from 'react-native';
 import { searchPlaces, PlaceResult } from '../utils/nominatim';
+import { Region } from '../types/game';
 
 interface PlaceSearchProps {
   visible: boolean;
+  regions: Region[];
   onSelect: (place: PlaceResult) => void;
+  onDeleteRegion: (regionId: string) => void;
   onClose: () => void;
 }
 
-export default function PlaceSearch({ visible, onSelect, onClose }: PlaceSearchProps) {
+export default function PlaceSearch({ visible, regions, onSelect, onDeleteRegion, onClose }: PlaceSearchProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,6 +48,25 @@ export default function PlaceSearch({ visible, onSelect, onClose }: PlaceSearchP
             <Text style={styles.closeBtn}>✕</Text>
           </TouchableOpacity>
         </View>
+
+        {regions.length > 0 && (
+          <View style={styles.currentSection}>
+            <Text style={styles.currentLabel}>Current regions:</Text>
+            {regions.map((region) => (
+              <View key={region.id} style={styles.currentField}>
+                <Text style={styles.currentName} numberOfLines={1}>
+                  {region.name.split(',')[0]}
+                </Text>
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => onDeleteRegion(region.id)}
+                >
+                  <Text style={styles.deleteBtnText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         <View style={styles.searchRow}>
           <TextInput
@@ -177,6 +199,48 @@ const styles = StyleSheet.create({
   resultName: {
     fontSize: 15,
     color: '#2c3e50',
+  },
+  currentSection: {
+    marginBottom: 12,
+  },
+  currentField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f8ff',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#d4e6f1',
+  },
+  currentInfo: {
+    flex: 1,
+  },
+  currentLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#7f8c8d',
+  },
+  currentName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  deleteBtn: {
+    backgroundColor: '#e74c3c',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  deleteBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   empty: {
     textAlign: 'center',

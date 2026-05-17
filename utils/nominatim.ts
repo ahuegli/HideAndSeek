@@ -62,6 +62,7 @@ export async function fetchPlaceBoundary(
     osmid: osmId.toString(),
     format: 'json',
     polygon_geojson: '1',
+    polygon_threshold: '0.001',
   });
 
   const res = await fetch(`${NOMINATIM_BASE}/lookup?osm_ids=${typePrefix}${osmId}&${params}`, {
@@ -93,5 +94,5 @@ export async function fetchPlaceBoundary(
   }
 
   const coords = ring.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
-  return simplifyCoords(coords, 500);
+  return simplifyCoords(coords, 2000);
 }

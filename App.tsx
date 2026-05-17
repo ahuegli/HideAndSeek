@@ -7,12 +7,13 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
 import MapView, { MapPressEvent } from 'react-native-maps';
 import MapScreen from './components/MapScreen';
 import QuestionSheet from './components/QuestionSheet';
 import ZoneDrawer from './components/ZoneDrawer';
 import PlaceSearch from './components/PlaceSearch';
-import { Coordinate, Game, Question } from './types/game';
+import { Coordinate, Game, Question, Region } from './types/game';
 import { fetchPlaceBoundary, PlaceResult } from './utils/nominatim';
 import { saveGame, loadGame, clearGame } from './utils/storage';
 
@@ -23,7 +24,7 @@ function generateId(): string {
 export default function App() {
   const mapRef = useRef<MapView>(null);
 
-  const [boundary, setBoundary] = useState<Coordinate[]>([]);
+  const [regions, setRegions] = useState<Region[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [gameId, setGameId] = useState<string>(generateId());
 
@@ -34,15 +35,21 @@ export default function App() {
   const [drawingZone, setDrawingZone] = useState<Coordinate[]>([]);
   const [pendingQuestion, setPendingQuestion] = useState<{ text: string; answer: string } | null>(null);
 
+  // Request location permission
+  useEffect(() => {
+    Location.requestForegroundPermissionsAsync();
+  }, []);
+
   // Load saved game on mount
   useEffect(() => {
     loadGame().then((saved) => {
       if (saved) {
-        setBoundary(saved.boundary);
+        setRegions(saved.regions || []);
         setQuestions(saved.questions);
         setGameId(saved.id);
-        if (saved.boundary.length > 0) {
-          setTimeout(() => fitToBoundary(saved.boundary), 500);
+        const allCoords = (saved.regions || []).flatMap((r) => r.coords);
+        if (allCoords.length > 0) {
+          setTimeout(() => fitToBoundary(allCoords), 500);
         }
       }
     });
@@ -52,12 +59,12 @@ export default function App() {
   useEffect(() => {
     const game: Game = {
       id: gameId,
-      boundary,
+      regions,
       questions,
       createdAt: Date.now(),
     };
     saveGame(game);
-  }, [boundary, questions, gameId]);
+  }, [regions, questions, gameId]);
 
   const fitToBoundary = (coords: Coordinate[]) => {
     mapRef.current?.fitToCoordinates(coords, {
@@ -71,15 +78,21 @@ export default function App() {
     setLoadingBoundary(true);
     try {
       const coords = await fetchPlaceBoundary(place.osmType, place.osmId);
-      setBoundary(coords);
-      setTimeout(() => fitToBoundary(coords), 300);
+      const newRegion: Region = {
+        id: generateId(),
+        name: place.name,
+        coords,
+      };
+      setRegions((prev) => [...prev, newRegion]);
+      const allCoords = [...regions.flatMap((r) => r.coords), ...coords];
+      setTimeout(() => fitToBoundary(allCoords), 300);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       Alert.alert('Boundary Error', message);
     } finally {
       setLoadingBoundary(false);
     }
-  }, []);
+  }, [regions]);
 
   const handleAddQuestion = useCallback((text: string, answer: string) => {
     setPendingQuestion({ text, answer });
@@ -128,6 +141,18 @@ export default function App() {
     setPendingQuestion(null);
   }, [pendingQuestion]);
 
+  const handleBoundaryPress = useCallback(() => {
+    setShowPlaceSearch(true);
+  }, []);
+
+  const handleDeleteRegion = useCallback((regionId: string) => {
+    setRegions((prev) => prev.filter((r) => r.id !== regionId));
+  }, []);
+
+  const handleBoundaryButton = useCallback(() => {
+    setShowPlaceSearch(true);
+  }, []);
+
   const handleNewGame = useCallback(() => {
     Alert.alert('New Game', 'Clear all data and start fresh?', [
       { text: 'Cancel', style: 'cancel' },
@@ -135,7 +160,7 @@ export default function App() {
         text: 'New Game',
         style: 'destructive',
         onPress: () => {
-          setBoundary([]);
+          setRegions([]);
           setQuestions([]);
           setGameId(generateId());
           setIsDrawing(false);
@@ -154,11 +179,12 @@ export default function App() {
 
       <MapScreen
         ref={mapRef}
-        boundary={boundary}
+        regions={regions}
         questions={questions}
         drawingZone={drawingZone}
         isDrawing={isDrawing}
         onMapPress={handleMapPress}
+        onBoundaryPress={handleBoundaryPress}
       />
 
       <ZoneDrawer
@@ -171,9 +197,9 @@ export default function App() {
 
       {!isDrawing && !showQuestions && !showPlaceSearch && (
         <View style={styles.fab}>
-          <TouchableOpacity style={styles.fabBtn} onPress={() => setShowPlaceSearch(true)}>
+          <TouchableOpacity style={styles.fabBtn} onPress={handleBoundaryButton}>
             <Text style={styles.fabIcon}>🗺</Text>
-            <Text style={styles.fabLabel}>{loadingBoundary ? 'Loading...' : 'Boundary'}</Text>
+            <Text style={styles.fabLabel}>{loadingBoundary ? 'Loading...' : regions.length > 0 ? `${regions.length} region${regions.length > 1 ? 's' : ''}` : 'Boundary'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.fabBtn}
@@ -198,7 +224,9 @@ export default function App() {
 
       <PlaceSearch
         visible={showPlaceSearch}
+        regions={regions}
         onSelect={handlePlaceSelect}
+        onDeleteRegion={handleDeleteRegion}
         onClose={() => setShowPlaceSearch(false)}
       />
     </View>

@@ -1,14 +1,15 @@
 import React, { forwardRef, useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import MapView, { Polygon, PROVIDER_GOOGLE, MapPressEvent } from 'react-native-maps';
-import { Coordinate, Question } from '../types/game';
+import { Coordinate, Question, Region } from '../types/game';
 
 interface MapScreenProps {
-  boundary: Coordinate[];
+  regions: Region[];
   questions: Question[];
   drawingZone: Coordinate[];
   isDrawing: boolean;
   onMapPress: (e: MapPressEvent) => void;
+  onBoundaryPress: () => void;
 }
 
 const ZONE_COLORS = [
@@ -19,18 +20,20 @@ const ZONE_COLORS = [
   'rgba(26, 188, 156, 0.35)',
 ];
 
-// Build a padded bounding box around the boundary and use the boundary
-// itself as a hole, so the gray fill follows the exact outline.
-function buildMask(boundary: Coordinate[]): {
+// Build a padded bounding box around all regions and use each region
+// as a hole, so the gray fill covers everything outside all regions.
+function buildMask(regions: Region[]): {
   outer: Coordinate[];
-  hole: Coordinate[];
+  holes: Coordinate[][];
 } {
   let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-  for (const c of boundary) {
-    if (c.latitude < minLat) minLat = c.latitude;
-    if (c.latitude > maxLat) maxLat = c.latitude;
-    if (c.longitude < minLng) minLng = c.longitude;
-    if (c.longitude > maxLng) maxLng = c.longitude;
+  for (const region of regions) {
+    for (const c of region.coords) {
+      if (c.latitude < minLat) minLat = c.latitude;
+      if (c.latitude > maxLat) maxLat = c.latitude;
+      if (c.longitude < minLng) minLng = c.longitude;
+      if (c.longitude > maxLng) maxLng = c.longitude;
+    }
   }
   const pad = 30;
   const outer: Coordinate[] = [
@@ -39,17 +42,14 @@ function buildMask(boundary: Coordinate[]): {
     { latitude: maxLat + pad, longitude: maxLng + pad },
     { latitude: maxLat + pad, longitude: minLng - pad },
   ];
-  // Return boundary as-is for the hole — react-native-maps will
-  // cut it out. We also provide a reversed copy so we can try
-  // whichever winding the provider needs.
-  return { outer, hole: boundary };
+  return { outer, holes: regions.map((r) => r.coords) };
 }
 
 const MapScreen = forwardRef<MapView, MapScreenProps>(
-  ({ boundary, questions, drawingZone, isDrawing, onMapPress }, ref) => {
+  ({ regions, questions, drawingZone, isDrawing, onMapPress, onBoundaryPress }, ref) => {
     const mask = useMemo(
-      () => (boundary.length > 0 ? buildMask(boundary) : null),
-      [boundary]
+      () => (regions.length > 0 ? buildMask(regions) : null),
+      [regions]
     );
 
     return (
@@ -59,25 +59,31 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
         provider={PROVIDER_GOOGLE}
         onPress={isDrawing ? onMapPress : undefined}
         mapType="standard"
+        showsUserLocation
+        showsMyLocationButton
       >
-        {/* Gray mask with boundary cutout */}
+        {/* Gray mask with cutouts for all regions */}
         {mask && (
           <Polygon
             coordinates={mask.outer}
-            holes={[mask.hole]}
+            holes={mask.holes}
             strokeColor="transparent"
             fillColor="rgba(0, 0, 0, 0.4)"
           />
         )}
 
-        {boundary.length > 0 && (
+        {/* Boundary outline for each region */}
+        {regions.map((region) => (
           <Polygon
-            coordinates={boundary}
-            strokeColor="rgba(44, 62, 80, 0.9)"
-            strokeWidth={3}
+            key={region.id}
+            coordinates={region.coords}
+            strokeColor="rgba(44, 62, 80, 0.4)"
+            strokeWidth={1}
             fillColor="transparent"
+            tappable
+            onPress={onBoundaryPress}
           />
-        )}
+        ))}
 
         {questions.map((q, i) =>
           q.zone ? (

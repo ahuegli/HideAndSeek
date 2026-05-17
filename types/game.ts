@@ -11,9 +11,15 @@ export interface Question {
   timestamp: number;
 }
 
+export interface Region {
+  id: string;
+  name: string;
+  coords: Coordinate[];
+}
+
 export interface Game {
   id: string;
-  boundary: Coordinate[];
+  regions: Region[];
   questions: Question[];
   createdAt: number;
 }
