@@ -7,13 +7,14 @@ import {
   TouchableOpacity,
   FlatList,
   ScrollView,
+  ActivityIndicator,
   StyleSheet,
   KeyboardAvoidingView,
   Keyboard,
   Platform,
 } from 'react-native';
-import { Question, QuestionType, POI_CATEGORIES } from '@hideandseek/shared';
-import type { POI } from '@hideandseek/shared';
+import { Question, QuestionType, POI_CATEGORIES, searchPlaces, fetchPlaceBoundary } from '@hideandseek/shared';
+import type { POI, PlaceResult, Coordinate } from '@hideandseek/shared';
 
 interface QuestionSheetProps {
   questions: Question[];
@@ -21,7 +22,7 @@ interface QuestionSheetProps {
   onClose: () => void;
   onAddQuestion: (text: string, answer: string) => void;
   onAddRadar: (radiusKm: number, hiderInside: boolean) => void;
-  onAddDistrict: (district: string, sameDistrict: boolean) => void;
+  onAddDistrict: (district: string, sameDistrict: boolean, coords: Coordinate[]) => void;
   onAddTentacle: (category: string, selectedPOI: POI) => void;
   onFetchTentaclePOIs: (categoryKey: string) => void;
   tentaclePOILoading: boolean;
@@ -53,7 +54,12 @@ export default function QuestionSheet({
   const [hiderInside, setHiderInside] = useState<boolean | null>(null);
 
   // District state
+  const [districtQuery, setDistrictQuery] = useState('');
+  const [districtResults, setDistrictResults] = useState<PlaceResult[]>([]);
+  const [districtSearching, setDistrictSearching] = useState(false);
   const [districtName, setDistrictName] = useState('');
+  const [districtCoords, setDistrictCoords] = useState<Coordinate[]>([]);
+  const [districtLoading, setDistrictLoading] = useState(false);
   const [sameDistrict, setSameDistrict] = useState<boolean | null>(null);
 
   // Tentacle state
@@ -337,46 +343,124 @@ export default function QuestionSheet({
           </View>
         ) : mode === 'district' ? (
           <View style={styles.inputArea}>
-            <TextInput
-              style={styles.input}
-              placeholder="District name..."
-              value={districtName}
-              onChangeText={setDistrictName}
-              placeholderTextColor="#999"
-              returnKeyType="done"
-              onSubmitEditing={() => Keyboard.dismiss()}
-            />
-            <Text style={styles.answerLabel}>Is the hider in this district?</Text>
-            <View style={styles.answerRow}>
-              <TouchableOpacity
-                style={[styles.answerBtn, sameDistrict === true && styles.answerBtnYes]}
-                onPress={() => setSameDistrict(true)}
-              >
-                <Text style={[styles.answerBtnText, sameDistrict === true && styles.answerBtnTextActive]}>
-                  ✓ Yes
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.answerBtn, sameDistrict === false && styles.answerBtnNo]}
-                onPress={() => setSameDistrict(false)}
-              >
-                <Text style={[styles.answerBtnText, sameDistrict === false && styles.answerBtnTextActive]}>
-                  ✗ No
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={[styles.addBtn, (!districtName.trim() || sameDistrict === null) && styles.addBtnDisabled]}
-              onPress={() => {
-                Keyboard.dismiss();
-                onAddDistrict(districtName.trim(), sameDistrict!);
-                setDistrictName('');
-                setSameDistrict(null);
-              }}
-              disabled={!districtName.trim() || sameDistrict === null}
-            >
-              <Text style={styles.addBtnText}>Add District Question</Text>
-            </TouchableOpacity>
+            {districtCoords.length > 0 ? (
+              <>
+                <View style={styles.districtSelected}>
+                  <Text style={styles.districtSelectedText} numberOfLines={1}>
+                    🏛️ {districtName}
+                  </Text>
+                  <TouchableOpacity onPress={() => {
+                    setDistrictName('');
+                    setDistrictCoords([]);
+                    setSameDistrict(null);
+                  }}>
+                    <Text style={styles.districtClearText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.answerLabel}>Is the hider in this district?</Text>
+                <View style={styles.answerRow}>
+                  <TouchableOpacity
+                    style={[styles.answerBtn, sameDistrict === true && styles.answerBtnYes]}
+                    onPress={() => setSameDistrict(true)}
+                  >
+                    <Text style={[styles.answerBtnText, sameDistrict === true && styles.answerBtnTextActive]}>
+                      ✓ Yes
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.answerBtn, sameDistrict === false && styles.answerBtnNo]}
+                    onPress={() => setSameDistrict(false)}
+                  >
+                    <Text style={[styles.answerBtnText, sameDistrict === false && styles.answerBtnTextActive]}>
+                      ✗ No
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  style={[styles.addBtn, sameDistrict === null && styles.addBtnDisabled]}
+                  onPress={() => {
+                    onAddDistrict(districtName, sameDistrict!, districtCoords);
+                    setDistrictName('');
+                    setDistrictCoords([]);
+                    setDistrictQuery('');
+                    setDistrictResults([]);
+                    setSameDistrict(null);
+                  }}
+                  disabled={sameDistrict === null}
+                >
+                  <Text style={styles.addBtnText}>Add District Question</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={styles.searchRow}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="Search district, city, region..."
+                    value={districtQuery}
+                    onChangeText={setDistrictQuery}
+                    onSubmitEditing={async () => {
+                      if (!districtQuery.trim()) return;
+                      setDistrictSearching(true);
+                      try {
+                        const places = await searchPlaces(districtQuery.trim());
+                        setDistrictResults(places);
+                      } catch {
+                        setDistrictResults([]);
+                      } finally {
+                        setDistrictSearching(false);
+                      }
+                    }}
+                    returnKeyType="search"
+                    placeholderTextColor="#999"
+                  />
+                  <TouchableOpacity
+                    style={styles.searchBtn}
+                    onPress={async () => {
+                      if (!districtQuery.trim()) return;
+                      Keyboard.dismiss();
+                      setDistrictSearching(true);
+                      try {
+                        const places = await searchPlaces(districtQuery.trim());
+                        setDistrictResults(places);
+                      } catch {
+                        setDistrictResults([]);
+                      } finally {
+                        setDistrictSearching(false);
+                      }
+                    }}
+                  >
+                    <Text style={styles.searchBtnText}>🔍</Text>
+                  </TouchableOpacity>
+                </View>
+                {districtSearching && <ActivityIndicator style={{ marginVertical: 8 }} color="#e74c3c" />}
+                {districtLoading && <Text style={styles.poiFeedback}>Fetching boundary...</Text>}
+                <ScrollView style={styles.districtResultList} nestedScrollEnabled>
+                  {districtResults.map((place) => (
+                    <TouchableOpacity
+                      key={place.id}
+                      style={styles.districtResultItem}
+                      onPress={async () => {
+                        setDistrictLoading(true);
+                        setDistrictResults([]);
+                        try {
+                          const coords = await fetchPlaceBoundary(place.osmType, place.osmId);
+                          setDistrictName(place.name.split(',')[0]);
+                          setDistrictCoords(coords);
+                          setDistrictQuery('');
+                        } catch {
+                          Alert.alert('Error', 'Could not fetch boundary for this place.');
+                        } finally {
+                          setDistrictLoading(false);
+                        }
+                      }}
+                    >
+                      <Text style={styles.districtResultText} numberOfLines={2}>{place.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            )}
           </View>
         ) : mode === 'tentacle' ? (
           <View style={styles.inputArea}>
@@ -783,6 +867,52 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     fontStyle: 'italic',
     marginBottom: 2,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  searchBtn: {
+    backgroundColor: '#e74c3c',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+  },
+  searchBtnText: {
+    fontSize: 16,
+  },
+  districtResultList: {
+    maxHeight: 150,
+  },
+  districtResultItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ecf0f1',
+  },
+  districtResultText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  districtSelected: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#eaf2f8',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  districtSelectedText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#2c3e50',
+    flex: 1,
+  },
+  districtClearText: {
+    fontSize: 16,
+    color: '#7f8c8d',
+    paddingLeft: 8,
   },
   answerLabel: {
     fontSize: 14,

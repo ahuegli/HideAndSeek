@@ -174,6 +174,50 @@ function buildMask(
   // Start with region polygons as safe-area holes
   let holes: Coordinate[][] = regions.map((r) => [...r.coords]);
 
+  // Apply district questions FIRST (while holes are still clean region polygons)
+  const districts = questions.filter(
+    (q) => q.district?.coords && q.district.coords.length >= 3
+  );
+  for (const q of districts) {
+    const distPoly = q.district!.coords;
+
+    if (q.district!.sameDistrict) {
+      // Hider IS inside district → safe area = holes ∩ district
+      holes = holes
+        .map((hole) => {
+          const allHoleInDist = hole.every((v) => isInsidePolygon(v, distPoly));
+          if (allHoleInDist) return hole; // hole already more constrained
+
+          const allDistInHole = distPoly.every((v) => isInsidePolygon(v, hole));
+          if (allDistInHole) return [...distPoly]; // district is the new bound
+
+          // Partial or no overlap
+          const anyOverlap =
+            distPoly.some((v) => isInsidePolygon(v, hole)) ||
+            hole.some((v) => isInsidePolygon(v, distPoly));
+          if (!anyOverlap) return []; // no overlap, eliminate this hole
+          // Use the smaller polygon as best approximation of the intersection
+          return polygonArea(hole) <= polygonArea(distPoly) ? hole : [...distPoly];
+        })
+        .filter((h) => h.length >= 3);
+    } else {
+      // Hider NOT inside district → safe area = holes − district
+      holes = holes
+        .flatMap((hole) => {
+          const anyDistInHole = distPoly.some((v) => isInsidePolygon(v, hole));
+          const anyHoleInDist = hole.some((v) => isInsidePolygon(v, distPoly));
+          if (!anyDistInHole && !anyHoleInDist) return [hole]; // no overlap
+
+          const allHoleInDist = hole.every((v) => isInsidePolygon(v, distPoly));
+          if (allHoleInDist) return []; // hole entirely eliminated
+
+          // District overlaps hole — subtract it using bridge-cut
+          return [bridgeCut(hole, distPoly)];
+        })
+        .filter((h) => h.length >= 3);
+    }
+  }
+
   // Apply each radar question to shrink the safe area
   const radars = questions.filter((q) => q.radar);
   for (const q of radars) {
@@ -295,6 +339,8 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
             />
           ) : null
         )}
+
+
 
         {drawingZone.length > 0 && (
           <Polygon

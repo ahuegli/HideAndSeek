@@ -235,7 +235,7 @@ export default function App() {
     setQuestions((prev) => prev.filter((q) => q.id !== id));
   }, []);
 
-  const handleAddDistrict = useCallback((district: string, sameDistrict: boolean) => {
+  const handleAddDistrict = useCallback((district: string, sameDistrict: boolean, coords: Coordinate[]) => {
     const question: Question = {
       id: generateId(),
       type: 'district',
@@ -243,7 +243,7 @@ export default function App() {
       answer: sameDistrict ? 'Yes' : 'No',
       zone: null,
       radar: null,
-      district: { district, sameDistrict },
+      district: { district, sameDistrict, coords },
       tentacle: null,
       timestamp: Date.now(),
     };

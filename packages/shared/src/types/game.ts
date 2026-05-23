@@ -14,6 +14,7 @@ export interface RadarData {
 export interface DistrictData {
   district: string;
   sameDistrict: boolean;
+  coords: Coordinate[];
 }
 
 export interface TentacleData {
