@@ -10,7 +10,7 @@ import {
   Keyboard,
   Platform,
 } from 'react-native';
-import { Question, QuestionType } from '../types/game';
+import { Question, QuestionType } from '@hideandseek/shared';
 
 interface QuestionSheetProps {
   questions: Question[];

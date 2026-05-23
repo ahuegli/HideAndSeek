@@ -1,8 +1,8 @@
 import React, { forwardRef, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import MapView, { Polygon, Marker, PROVIDER_GOOGLE, MapPressEvent } from 'react-native-maps';
-import { Coordinate, Question, Region } from '../types/game';
-import { TrainStop } from '../utils/overpass';
+import { Coordinate, Question, Region } from '@hideandseek/shared';
+import type { TrainStop } from '@hideandseek/shared';
 
 interface MapScreenProps {
   regions: Region[];

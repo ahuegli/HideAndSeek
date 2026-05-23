@@ -14,9 +14,8 @@ import MapScreen from './components/MapScreen';
 import QuestionSheet from './components/QuestionSheet';
 import ZoneDrawer from './components/ZoneDrawer';
 import PlaceSearch from './components/PlaceSearch';
-import { Coordinate, Game, Question, Region } from './types/game';
-import { fetchPlaceBoundary, PlaceResult } from './utils/nominatim';
-import { fetchTrainStops, TrainStop } from './utils/overpass';
+import { Coordinate, Game, Question, Region, fetchPlaceBoundary, fetchTrainStops } from '@hideandseek/shared';
+import type { PlaceResult, TrainStop } from '@hideandseek/shared';
 import { saveGame, loadGame, clearGame } from './utils/storage';
 
 function generateId(): string {

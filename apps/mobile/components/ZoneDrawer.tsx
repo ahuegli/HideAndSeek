@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Coordinate } from '../types/game';
+import { Coordinate } from '@hideandseek/shared';
 
 interface ZoneDrawerProps {
   visible: boolean;

@@ -8,8 +8,8 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import { searchPlaces, PlaceResult } from '../utils/nominatim';
-import { Region } from '../types/game';
+import { searchPlaces, Region } from '@hideandseek/shared';
+import type { PlaceResult } from '@hideandseek/shared';
 
 interface PlaceSearchProps {
   visible: boolean;
