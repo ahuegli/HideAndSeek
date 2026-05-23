@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   TextInput,
   TouchableOpacity,
   FlatList,
+  ScrollView,
   StyleSheet,
   KeyboardAvoidingView,
   Keyboard,
   Platform,
 } from 'react-native';
-import { Question, QuestionType } from '@hideandseek/shared';
+import { Question, QuestionType, POI_CATEGORIES } from '@hideandseek/shared';
+import type { POI } from '@hideandseek/shared';
 
 interface QuestionSheetProps {
   questions: Question[];
@@ -18,8 +21,14 @@ interface QuestionSheetProps {
   onClose: () => void;
   onAddQuestion: (text: string, answer: string) => void;
   onAddRadar: (radiusKm: number, hiderInside: boolean) => void;
+  onAddDistrict: (district: string, sameDistrict: boolean) => void;
+  onAddTentacle: (category: string, selectedPOI: POI) => void;
+  onFetchTentaclePOIs: (categoryKey: string) => void;
+  tentaclePOILoading: boolean;
+  tentaclePOIs: POI[];
   onEditRadar: (id: string, radiusKm: number, hiderInside: boolean) => void;
   onLocateRadar: (id: string) => void;
+  onDeleteQuestion: (id: string) => void;
 }
 
 export default function QuestionSheet({
@@ -28,14 +37,30 @@ export default function QuestionSheet({
   onClose,
   onAddQuestion,
   onAddRadar,
+  onAddDistrict,
+  onAddTentacle,
+  onFetchTentaclePOIs,
+  tentaclePOILoading,
+  tentaclePOIs,
   onEditRadar,
   onLocateRadar,
+  onDeleteQuestion,
 }: QuestionSheetProps) {
   const [mode, setMode] = useState<QuestionType>('radar');
   const [text, setText] = useState('');
   const [answer, setAnswer] = useState('');
   const [radiusKm, setRadiusKm] = useState('');
   const [hiderInside, setHiderInside] = useState<boolean | null>(null);
+
+  // District state
+  const [districtName, setDistrictName] = useState('');
+  const [sameDistrict, setSameDistrict] = useState<boolean | null>(null);
+
+  // Tentacle state
+  const [tentacleCategory, setTentacleCategory] = useState('');
+  const [selectedPOI, setSelectedPOI] = useState<POI | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [poiDropdownOpen, setPoiDropdownOpen] = useState(false);
 
   // Editing state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -173,6 +198,24 @@ export default function QuestionSheet({
                         → Hider is {item.radar.hiderInside ? 'inside' : 'outside'}
                       </Text>
                     </>
+                  ) : item.type === 'district' && item.district ? (
+                    <>
+                      <Text style={styles.questionText}>
+                        🏛 Same district: {item.district.district}
+                      </Text>
+                      <Text style={[styles.answerText, { color: item.district.sameDistrict ? '#27ae60' : '#e74c3c' }]}>
+                        → {item.district.sameDistrict ? 'Yes' : 'No'}
+                      </Text>
+                    </>
+                  ) : item.type === 'tentacle' && item.tentacle ? (
+                    <>
+                      <Text style={styles.questionText}>
+                        🐙 Nearest {item.tentacle.category}
+                      </Text>
+                      <Text style={styles.answerText}>
+                        → {item.tentacle.answer}
+                      </Text>
+                    </>
                   ) : (
                     <>
                       <Text style={styles.questionText}>{item.text}</Text>
@@ -183,22 +226,37 @@ export default function QuestionSheet({
                     <Text style={styles.zoneLabel}>📍 Zone marked</Text>
                   )}
                 </View>
-                {item.type === 'radar' && item.radar && (
-                  <View style={styles.radarActions}>
-                    <TouchableOpacity
-                      style={styles.radarActionBtn}
-                      onPress={() => onLocateRadar(item.id)}
-                    >
-                      <Text style={styles.radarActionIcon}>📍</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.radarActionBtn}
-                      onPress={() => startEdit(item)}
-                    >
-                      <Text style={styles.radarActionIcon}>✎</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                <View style={styles.radarActions}>
+                  {item.type === 'radar' && item.radar && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.radarActionBtn}
+                        onPress={() => onLocateRadar(item.id)}
+                      >
+                        <Text style={styles.radarActionIcon}>📍</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.radarActionBtn}
+                        onPress={() => startEdit(item)}
+                      >
+                        <Text style={styles.radarActionIcon}>✎</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <TouchableOpacity
+                    style={styles.radarActionBtn}
+                    onPress={() => Alert.alert(
+                      'Delete Question',
+                      'Are you sure you want to delete this question?',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Delete', style: 'destructive', onPress: () => onDeleteQuestion(item.id) },
+                      ]
+                    )}
+                  >
+                    <Text style={styles.radarActionIcon}>🗑</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           }}
@@ -213,41 +271,32 @@ export default function QuestionSheet({
             style={[styles.modeBtn, mode === 'radar' && styles.modeBtnActive]}
             onPress={() => setMode('radar')}
           >
-            <Text style={[styles.modeBtnText, mode === 'radar' && styles.modeBtnTextActive]}>📡 Radar</Text>
+            <Text style={[styles.modeBtnText, mode === 'radar' && styles.modeBtnTextActive]}>📡</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeBtn, mode === 'district' && styles.modeBtnActive]}
+            onPress={() => setMode('district')}
+          >
+            <Text style={[styles.modeBtnText, mode === 'district' && styles.modeBtnTextActive]}>🏛️</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeBtn, mode === 'tentacle' && styles.modeBtnActive]}
+            onPress={() => setMode('tentacle')}
+          >
+            <Text style={[styles.modeBtnText, mode === 'tentacle' && styles.modeBtnTextActive]}>🐙</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.modeBtn, mode === 'freeform' && styles.modeBtnActive]}
             onPress={() => setMode('freeform')}
           >
-            <Text style={[styles.modeBtnText, mode === 'freeform' && styles.modeBtnTextActive]}>✏️ Freeform</Text>
+            <Text style={[styles.modeBtnText, mode === 'freeform' && styles.modeBtnTextActive]}>✏️</Text>
           </TouchableOpacity>
         </View>
+        <Text style={styles.modeLabel}>
+          {mode === 'radar' ? 'Radar' : mode === 'district' ? 'District' : mode === 'tentacle' ? 'Tentacle' : 'Freeform'}
+        </Text>
 
-        {mode === 'freeform' ? (
-          <View style={styles.inputArea}>
-            <TextInput
-              style={styles.input}
-              placeholder="Question..."
-              value={text}
-              onChangeText={setText}
-              placeholderTextColor="#999"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Answer..."
-              value={answer}
-              onChangeText={setAnswer}
-              placeholderTextColor="#999"
-            />
-            <TouchableOpacity
-              style={[styles.addBtn, (!text.trim() || !answer.trim()) && styles.addBtnDisabled]}
-              onPress={handleSubmitFreeform}
-              disabled={!text.trim() || !answer.trim()}
-            >
-              <Text style={styles.addBtnText}>Add Question → Draw Zone</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
+        {mode === 'radar' ? (
           <View style={styles.inputArea}>
             <TextInput
               style={styles.input}
@@ -284,6 +333,162 @@ export default function QuestionSheet({
               disabled={!canSubmitRadar}
             >
               <Text style={styles.addBtnText}>Add Radar (uses your location)</Text>
+            </TouchableOpacity>
+          </View>
+        ) : mode === 'district' ? (
+          <View style={styles.inputArea}>
+            <TextInput
+              style={styles.input}
+              placeholder="District name..."
+              value={districtName}
+              onChangeText={setDistrictName}
+              placeholderTextColor="#999"
+              returnKeyType="done"
+              onSubmitEditing={() => Keyboard.dismiss()}
+            />
+            <Text style={styles.answerLabel}>Is the hider in this district?</Text>
+            <View style={styles.answerRow}>
+              <TouchableOpacity
+                style={[styles.answerBtn, sameDistrict === true && styles.answerBtnYes]}
+                onPress={() => setSameDistrict(true)}
+              >
+                <Text style={[styles.answerBtnText, sameDistrict === true && styles.answerBtnTextActive]}>
+                  ✓ Yes
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.answerBtn, sameDistrict === false && styles.answerBtnNo]}
+                onPress={() => setSameDistrict(false)}
+              >
+                <Text style={[styles.answerBtnText, sameDistrict === false && styles.answerBtnTextActive]}>
+                  ✗ No
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[styles.addBtn, (!districtName.trim() || sameDistrict === null) && styles.addBtnDisabled]}
+              onPress={() => {
+                Keyboard.dismiss();
+                onAddDistrict(districtName.trim(), sameDistrict!);
+                setDistrictName('');
+                setSameDistrict(null);
+              }}
+              disabled={!districtName.trim() || sameDistrict === null}
+            >
+              <Text style={styles.addBtnText}>Add District Question</Text>
+            </TouchableOpacity>
+          </View>
+        ) : mode === 'tentacle' ? (
+          <View style={styles.inputArea}>
+            <Text style={styles.answerLabel}>POI category:</Text>
+            <TouchableOpacity
+              style={styles.dropdownToggle}
+              onPress={() => { setDropdownOpen(!dropdownOpen); setPoiDropdownOpen(false); }}
+            >
+              <Text style={styles.dropdownToggleText}>
+                {tentacleCategory
+                  ? `${POI_CATEGORIES.find((c) => c.key === tentacleCategory)?.emoji} ${POI_CATEGORIES.find((c) => c.key === tentacleCategory)?.label}`
+                  : 'Select a category...'}
+              </Text>
+              <Text style={styles.dropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            {dropdownOpen && (
+              <ScrollView style={styles.dropdownList} nestedScrollEnabled>
+                {POI_CATEGORIES.map((cat) => (
+                  <TouchableOpacity
+                    key={cat.key}
+                    style={[styles.dropdownItem, tentacleCategory === cat.key && styles.dropdownItemActive]}
+                    onPress={() => {
+                      setTentacleCategory(cat.key);
+                      setSelectedPOI(null);
+                      setDropdownOpen(false);
+                      onFetchTentaclePOIs(cat.key);
+                    }}
+                  >
+                    <Text style={[styles.dropdownItemText, tentacleCategory === cat.key && styles.dropdownItemTextActive]}>
+                      {cat.emoji} {cat.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            {tentacleCategory ? (
+              <>
+                <Text style={[styles.answerLabel, { marginTop: 6 }]}>Nearest POI:</Text>
+                {tentaclePOILoading ? (
+                  <Text style={styles.poiFeedback}>Loading nearby POIs...</Text>
+                ) : tentaclePOIs.length === 0 ? (
+                  <Text style={styles.poiFeedback}>No POIs found within 15 km</Text>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={styles.dropdownToggle}
+                      onPress={() => { setPoiDropdownOpen(!poiDropdownOpen); setDropdownOpen(false); }}
+                    >
+                      <Text style={styles.dropdownToggleText}>
+                        {selectedPOI ? selectedPOI.name : `Select from ${tentaclePOIs.length} POIs...`}
+                      </Text>
+                      <Text style={styles.dropdownArrow}>{poiDropdownOpen ? '▲' : '▼'}</Text>
+                    </TouchableOpacity>
+                    {poiDropdownOpen && (
+                      <ScrollView style={styles.dropdownList} nestedScrollEnabled>
+                        {tentaclePOIs.map((poi) => (
+                          <TouchableOpacity
+                            key={poi.id}
+                            style={[styles.dropdownItem, selectedPOI?.id === poi.id && styles.dropdownItemActive]}
+                            onPress={() => {
+                              setSelectedPOI(poi);
+                              setPoiDropdownOpen(false);
+                            }}
+                          >
+                            <Text style={[styles.dropdownItemText, selectedPOI?.id === poi.id && styles.dropdownItemTextActive]}>
+                              {poi.name}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    )}
+                  </>
+                )}
+              </>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.addBtn, (!tentacleCategory || !selectedPOI) && styles.addBtnDisabled]}
+              onPress={() => {
+                if (!selectedPOI) return;
+                onAddTentacle(tentacleCategory, selectedPOI);
+                setTentacleCategory('');
+                setSelectedPOI(null);
+              }}
+              disabled={!tentacleCategory || !selectedPOI}
+            >
+              <Text style={styles.addBtnText}>Add Tentacle Question</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.inputArea}>
+            <TextInput
+              style={styles.input}
+              placeholder="Question..."
+              value={text}
+              onChangeText={setText}
+              placeholderTextColor="#999"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Answer..."
+              value={answer}
+              onChangeText={setAnswer}
+              placeholderTextColor="#999"
+            />
+            <TouchableOpacity
+              style={[styles.addBtn, (!text.trim() || !answer.trim()) && styles.addBtnDisabled]}
+              onPress={handleSubmitFreeform}
+              disabled={!text.trim() || !answer.trim()}
+            >
+              <Text style={styles.addBtnText}>Add Question → Draw Zone</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -519,6 +724,65 @@ const styles = StyleSheet.create({
   },
   modeBtnTextActive: {
     color: '#fff',
+  },
+  modeLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7f8c8d',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  dropdownToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#dfe6e9',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8f9fa',
+    marginBottom: 4,
+  },
+  dropdownToggleText: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    color: '#7f8c8d',
+  },
+  dropdownList: {
+    maxHeight: 180,
+    borderWidth: 1,
+    borderColor: '#dfe6e9',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    marginBottom: 4,
+  },
+  dropdownItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ecf0f1',
+  },
+  dropdownItemActive: {
+    backgroundColor: '#eaf2f8',
+  },
+  dropdownItemText: {
+    fontSize: 14,
+    color: '#2c3e50',
+  },
+  dropdownItemTextActive: {
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  poiFeedback: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontStyle: 'italic',
+    marginBottom: 2,
   },
   answerLabel: {
     fontSize: 14,

@@ -3,12 +3,23 @@ export interface Coordinate {
   longitude: number;
 }
 
-export type QuestionType = 'freeform' | 'radar';
+export type QuestionType = 'freeform' | 'radar' | 'district' | 'tentacle';
 
 export interface RadarData {
   center: Coordinate;
   radiusKm: number;
   hiderInside: boolean;
+}
+
+export interface DistrictData {
+  district: string;
+  sameDistrict: boolean;
+}
+
+export interface TentacleData {
+  category: string;
+  answer: string;
+  voronoiCell: Coordinate[] | null;
 }
 
 export interface Question {
@@ -18,6 +29,8 @@ export interface Question {
   answer: string;
   zone: Coordinate[] | null;
   radar: RadarData | null;
+  district: DistrictData | null;
+  tentacle: TentacleData | null;
   timestamp: number;
 }
 

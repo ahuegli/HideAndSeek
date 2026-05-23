@@ -3,6 +3,8 @@ export type {
   Coordinate,
   QuestionType,
   RadarData,
+  DistrictData,
+  TentacleData,
   Question,
   Region,
   Game,
@@ -12,8 +14,8 @@ export type {
 export { parseGeoJson } from './utils/geojson';
 export { searchPlaces, fetchPlaceBoundary } from './utils/nominatim';
 export type { PlaceResult } from './utils/nominatim';
-export { fetchTrainStops } from './utils/overpass';
-export type { TrainStop } from './utils/overpass';
+export { fetchTrainStops, fetchPOIsNearby, POI_CATEGORIES } from './utils/overpass';
+export type { TrainStop, POI, POICategory } from './utils/overpass';
 
 // Store
 export type { GameStore } from './store/GameStore';

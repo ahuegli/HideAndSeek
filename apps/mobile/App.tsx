@@ -14,12 +14,78 @@ import MapScreen from './components/MapScreen';
 import QuestionSheet from './components/QuestionSheet';
 import ZoneDrawer from './components/ZoneDrawer';
 import PlaceSearch from './components/PlaceSearch';
-import { Coordinate, Game, Question, Region, fetchPlaceBoundary, fetchTrainStops } from '@hideandseek/shared';
-import type { PlaceResult, TrainStop } from '@hideandseek/shared';
+import { Coordinate, Game, Question, Region, fetchPlaceBoundary, fetchTrainStops, fetchPOIsNearby, POI_CATEGORIES } from '@hideandseek/shared';
+import type { PlaceResult, TrainStop, POI, POICategory } from '@hideandseek/shared';
 import { saveGame, loadGame, clearGame } from './utils/storage';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// --- Voronoi cell computation ---
+// Clips polygon to the half-plane where `selected` is closer than `other`.
+function clipByBisector(
+  polygon: Coordinate[],
+  selected: Coordinate,
+  other: Coordinate
+): Coordinate[] {
+  const dx = other.longitude - selected.longitude;
+  const dy = other.latitude - selected.latitude;
+  const mx = (selected.longitude + other.longitude) / 2;
+  const my = (selected.latitude + other.latitude) / 2;
+
+  const side = (q: Coordinate) =>
+    dx * (q.longitude - mx) + dy * (q.latitude - my);
+
+  const output: Coordinate[] = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const curr = polygon[i];
+    const prev = polygon[(i + polygon.length - 1) % polygon.length];
+    const cVal = side(curr);
+    const pVal = side(prev);
+    if (cVal <= 0) {
+      if (pVal > 0) {
+        const t = pVal / (pVal - cVal);
+        output.push({
+          latitude: prev.latitude + t * (curr.latitude - prev.latitude),
+          longitude: prev.longitude + t * (curr.longitude - prev.longitude),
+        });
+      }
+      output.push(curr);
+    } else if (pVal <= 0) {
+      const t = pVal / (pVal - cVal);
+      output.push({
+        latitude: prev.latitude + t * (curr.latitude - prev.latitude),
+        longitude: prev.longitude + t * (curr.longitude - prev.longitude),
+      });
+    }
+  }
+  return output;
+}
+
+function computeVoronoiCell(
+  selected: Coordinate,
+  allPOIs: Coordinate[]
+): Coordinate[] {
+  const pad = 5;
+  let cell: Coordinate[] = [
+    { latitude: selected.latitude - pad, longitude: selected.longitude - pad },
+    { latitude: selected.latitude - pad, longitude: selected.longitude + pad },
+    { latitude: selected.latitude + pad, longitude: selected.longitude + pad },
+    { latitude: selected.latitude + pad, longitude: selected.longitude - pad },
+  ];
+
+  for (const other of allPOIs) {
+    if (
+      other.latitude === selected.latitude &&
+      other.longitude === selected.longitude
+    )
+      continue;
+    cell = clipByBisector(cell, selected, other);
+    if (cell.length < 3) return [];
+  }
+
+  return cell;
 }
 
 export default function App() {
@@ -39,6 +105,8 @@ export default function App() {
   const [trainStops, setTrainStops] = useState<TrainStop[]>([]);
   const [showTrainStops, setShowTrainStops] = useState(false);
   const [loadingStops, setLoadingStops] = useState(false);
+  const [tentaclePOIs, setTentaclePOIs] = useState<POI[]>([]);
+  const [tentaclePOILoading, setTentaclePOILoading] = useState(false);
 
   // Request location permission
   useEffect(() => {
@@ -127,6 +195,8 @@ export default function App() {
           radiusKm,
           hiderInside,
         },
+        district: null,
+        tentacle: null,
         timestamp: Date.now(),
       };
       setQuestions((prev) => [...prev, question]);
@@ -161,6 +231,68 @@ export default function App() {
     }, 500);
   }, [questions]);
 
+  const handleDeleteQuestion = useCallback((id: string) => {
+    setQuestions((prev) => prev.filter((q) => q.id !== id));
+  }, []);
+
+  const handleAddDistrict = useCallback((district: string, sameDistrict: boolean) => {
+    const question: Question = {
+      id: generateId(),
+      type: 'district',
+      text: `District: ${district}`,
+      answer: sameDistrict ? 'Yes' : 'No',
+      zone: null,
+      radar: null,
+      district: { district, sameDistrict },
+      tentacle: null,
+      timestamp: Date.now(),
+    };
+    setQuestions((prev) => [...prev, question]);
+  }, []);
+
+  const handleAddTentacle = useCallback((category: string, selectedPOI: POI) => {
+    const otherCoords = tentaclePOIs.map((p) => p.coordinate);
+    const voronoiCell =
+      tentaclePOIs.length > 1
+        ? computeVoronoiCell(selectedPOI.coordinate, otherCoords)
+        : null;
+    const question: Question = {
+      id: generateId(),
+      type: 'tentacle',
+      text: `Nearest ${category}`,
+      answer: selectedPOI.name,
+      zone: null,
+      radar: null,
+      district: null,
+      tentacle: { category, answer: selectedPOI.name, voronoiCell },
+      timestamp: Date.now(),
+    };
+    setQuestions((prev) => [...prev, question]);
+    setTentaclePOIs([]);
+  }, [tentaclePOIs]);
+
+  const handleFetchTentaclePOIs = useCallback(async (categoryKey: string) => {
+    const category = POI_CATEGORIES.find((c) => c.key === categoryKey);
+    if (!category) return;
+    setTentaclePOILoading(true);
+    setTentaclePOIs([]);
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const center: Coordinate = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      };
+      const pois = await fetchPOIsNearby(center, 15, category);
+      setTentaclePOIs(pois);
+    } catch {
+      Alert.alert('Error', 'Could not fetch POIs. Check location permissions.');
+    } finally {
+      setTentaclePOILoading(false);
+    }
+  }, []);
+
   const handleMapPress = useCallback((e: MapPressEvent) => {
     const { latitude, longitude } = e.nativeEvent.coordinate;
     setDrawingZone((prev) => [...prev, { latitude, longitude }]);
@@ -179,6 +311,8 @@ export default function App() {
       answer: pendingQuestion.answer,
       zone: drawingZone.length >= 3 ? drawingZone : null,
       radar: null,
+      district: null,
+      tentacle: null,
       timestamp: Date.now(),
     };
     setQuestions((prev) => [...prev, question]);
@@ -197,6 +331,8 @@ export default function App() {
       answer: pendingQuestion.answer,
       zone: null,
       radar: null,
+      district: null,
+      tentacle: null,
       timestamp: Date.now(),
     };
     setQuestions((prev) => [...prev, question]);
@@ -249,6 +385,7 @@ export default function App() {
         regions={regions}
         questions={questions}
         trainStops={showTrainStops ? trainStops : []}
+        tentaclePOIs={tentaclePOIs}
         drawingZone={drawingZone}
         isDrawing={isDrawing}
         onMapPress={handleMapPress}
@@ -346,8 +483,14 @@ export default function App() {
         onClose={() => setShowQuestions(false)}
         onAddQuestion={handleAddQuestion}
         onAddRadar={handleAddRadar}
+        onAddDistrict={handleAddDistrict}
+        onAddTentacle={handleAddTentacle}
+        onFetchTentaclePOIs={handleFetchTentaclePOIs}
+        tentaclePOILoading={tentaclePOILoading}
+        tentaclePOIs={tentaclePOIs}
         onEditRadar={handleEditRadar}
         onLocateRadar={handleLocateRadar}
+        onDeleteQuestion={handleDeleteQuestion}
       />
 
       <PlaceSearch

@@ -2,12 +2,13 @@ import React, { forwardRef, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import MapView, { Polygon, Marker, PROVIDER_GOOGLE, MapPressEvent } from 'react-native-maps';
 import { Coordinate, Question, Region } from '@hideandseek/shared';
-import type { TrainStop } from '@hideandseek/shared';
+import type { TrainStop, POI } from '@hideandseek/shared';
 
 interface MapScreenProps {
   regions: Region[];
   questions: Question[];
   trainStops: TrainStop[];
+  tentaclePOIs: POI[];
   drawingZone: Coordinate[];
   isDrawing: boolean;
   onMapPress: (e: MapPressEvent) => void;
@@ -197,6 +198,17 @@ function buildMask(
     }
   }
 
+  // Apply each tentacle question — hider must be in the Voronoi cell
+  const tentacles = questions.filter(
+    (q) => q.tentacle?.voronoiCell && q.tentacle.voronoiCell.length >= 3
+  );
+  for (const q of tentacles) {
+    const cell = q.tentacle!.voronoiCell!;
+    holes = holes
+      .map((h) => clipToConvex(h, cell))
+      .filter((h) => h.length >= 3);
+  }
+
   return { outer, holes };
 }
 
@@ -217,7 +229,7 @@ function isInsidePolygon(point: Coordinate, polygon: Coordinate[]): boolean {
 }
 
 const MapScreen = forwardRef<MapView, MapScreenProps>(
-  ({ regions, questions, trainStops, drawingZone, isDrawing, onMapPress, onBoundaryPress }, ref) => {
+  ({ regions, questions, trainStops, tentaclePOIs, drawingZone, isDrawing, onMapPress, onBoundaryPress }, ref) => {
     const mask = useMemo(
       () => (regions.length > 0 ? buildMask(regions, questions) : null),
       [regions, questions]
@@ -230,6 +242,14 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
         mask.holes.some((hole) => isInsidePolygon(stop.coordinate, hole))
       );
     }, [trainStops, mask]);
+
+    // Only show tentacle POIs inside the safe area
+    const visiblePOIs = useMemo(() => {
+      if (!mask || mask.holes.length === 0) return tentaclePOIs;
+      return tentaclePOIs.filter((poi) =>
+        mask.holes.some((hole) => isInsidePolygon(poi.coordinate, hole))
+      );
+    }, [tentaclePOIs, mask]);
 
     return (
       <MapView
@@ -293,8 +313,22 @@ const MapScreen = forwardRef<MapView, MapScreenProps>(
             coordinate={stop.coordinate}
             title={stop.name}
             anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
           >
             <View style={styles.trainDot} />
+          </Marker>
+        ))}
+
+        {/* Tentacle POI markers */}
+        {visiblePOIs.map((poi) => (
+          <Marker
+            key={`poi-${poi.id}`}
+            coordinate={poi.coordinate}
+            title={poi.name}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <View style={styles.poiDot} />
           </Marker>
         ))}
       </MapView>
@@ -312,6 +346,14 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#e74c3c',
     borderWidth: 1,
+    borderColor: '#fff',
+  },
+  poiDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#e67e22',
+    borderWidth: 1.5,
     borderColor: '#fff',
   },
 });
